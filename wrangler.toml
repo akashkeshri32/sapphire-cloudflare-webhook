@@ -1,0 +1,15 @@
+name = "cashfree-webhook"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Non-secret config. MAIN_APP_URL has no trailing slash.
+[vars]
+MAIN_APP_URL = "https://app.sapphireiq.in"
+
+# Created via the Cloudflare dashboard (Workers & Pages > Storage & Databases > Hyperdrive)
+# or `wrangler hyperdrive create`. Paste the ID it gives you below — see the
+# step-by-step guide for exactly where to get this.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "035b39760a1d40569e84ceda5a5397ab"

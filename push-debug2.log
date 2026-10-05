@@ -1,0 +1,10 @@
+﻿git : fatal: Could not read from remote repository.
+At line:2 char:1
++ git push -u origin main *> push-debug2.log
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (fatal: Could no...ote repository.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+Please make sure you have the correct access rights
+and the repository exists.

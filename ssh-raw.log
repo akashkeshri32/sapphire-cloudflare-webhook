@@ -1,0 +1,7 @@
+﻿ssh.exe : Hi akashkeshri32! You've successfully authenticated, but GitHub does not provide shell access.
+At line:1 char:302
++ ... tch {} } }; & "C:\Windows\System32\OpenSSH\ssh.exe" -o KexAlgorithms= ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Hi akashkeshri3...e shell access.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

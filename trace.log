@@ -1,0 +1,19 @@
+﻿git : 13:17:41.934719 exec-cmd.c:266          trace: resolved executable dir: C:/Program Files/Git/mingw64/bin
+At line:4 char:1
++ git ls-remote origin *> trace.log
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (13:17:41.934719...Git/mingw64/bin:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+13:17:41.945996 git.c:502               trace: built-in: git ls-remote origin
+13:17:41.947013 run-command.c:674       trace: run_command: unset GIT_PREFIX; GIT_PROTOCOL=version=2 
+'C:/Windows/System32/OpenSSH/ssh.exe -o KexAlgorithms=curve25519-sha256 -v' -o SendEnv=GIT_PROTOCOL git@github.com 
+'git-upload-pack '\''akashkeshri32/sapphire-cloudflare-webhook.git'\'''
+13:17:41.948027 run-command.c:946       trace: start_command: 'C:/Program Files/Git/usr/bin/sh.exe' -c 
+'C:/Windows/System32/OpenSSH/ssh.exe -o KexAlgorithms=curve25519-sha256 -v "$@"' 'C:/Windows/System32/OpenSSH/ssh.exe 
+-o KexAlgorithms=curve25519-sha256 -v' -o SendEnv=GIT_PROTOCOL git@github.com 'git-upload-pack 
+'\''akashkeshri32/sapphire-cloudflare-webhook.git'\'''
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.

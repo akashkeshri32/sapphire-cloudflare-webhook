@@ -1,0 +1,10 @@
+﻿git : fatal: Could not read from remote repository.
+At line:4 char:1
++ git ls-remote origin *> lsremote-debug.log
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (fatal: Could no...ote repository.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+Please make sure you have the correct access rights
+and the repository exists.
