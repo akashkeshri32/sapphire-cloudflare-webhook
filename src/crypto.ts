@@ -27,6 +27,25 @@ export async function verifyCashfreeSignature(
   }
 }
 
+// PhonePe authenticates its webhook with a static SHA-256 hash of
+// "username:password" (configured in the PhonePe Business Dashboard under
+// Developer Settings > Webhook) sent as the Authorization header on every
+// call — not a per-request signature like Cashfree's HMAC.
+export async function verifyPhonePeWebhookAuth(
+  authHeader: string,
+  username: string,
+  password: string,
+): Promise<boolean> {
+  if (!authHeader || !username || !password) return false
+  try {
+    const digest   = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${username}:${password}`))
+    const expected = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+    return timingSafeEqual(expected, authHeader)
+  } catch {
+    return false
+  }
+}
+
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
   let binary = ''

@@ -2,19 +2,21 @@ import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { eq } from 'drizzle-orm'
 import { createClient } from '@supabase/supabase-js'
-import { paymentOrders, users, enrollments, cashfreeWebhookLogs } from './db-schema'
-import { verifyCashfreeSignature, generatePassword } from './crypto'
+import { paymentOrders, users, enrollments, cashfreeWebhookLogs, phonepeWebhookLogs } from './db-schema'
+import { verifyCashfreeSignature, verifyPhonePeWebhookAuth, generatePassword } from './crypto'
 
 export interface Env {
   HYPERDRIVE: Hyperdrive
   CASHFREE_SECRET_KEY: string
+  PHONEPE_WEBHOOK_USERNAME: string
+  PHONEPE_WEBHOOK_PASSWORD: string
   SUPABASE_URL: string
   SUPABASE_SERVICE_ROLE_KEY: string
   INTERNAL_WEBHOOK_SECRET: string
   MAIN_APP_URL: string
 }
 
-const schema = { paymentOrders, users, enrollments, cashfreeWebhookLogs }
+const schema = { paymentOrders, users, enrollments, cashfreeWebhookLogs, phonepeWebhookLogs }
 type Db = PostgresJsDatabase<typeof schema>
 
 export default {
@@ -25,8 +27,16 @@ export default {
     const sql = postgres(env.HYPERDRIVE.connectionString, { max: 5, fetch_types: false })
     const db = drizzle(sql, { schema })
 
+    // Cashfree's webhook is already configured against this Worker's root
+    // URL in production — that path must keep working unchanged. PhonePe's
+    // webhook is registered against /phonepe instead, so neither gateway's
+    // routing can collide or interfere with the other.
+    const path = new URL(request.url).pathname
+
     try {
-      return await handleWebhook(request, env, db)
+      return path === '/phonepe'
+        ? await handlePhonePeWebhook(request, env, db)
+        : await handleCashfreeWebhook(request, env, db)
     } finally {
       // Don't let connection teardown block or slow the response.
       sql.end({ timeout: 0 }).catch(() => {})
@@ -38,7 +48,11 @@ async function logAttempt(db: Db, data: Omit<typeof cashfreeWebhookLogs.$inferIn
   await db.insert(cashfreeWebhookLogs).values(data)
 }
 
-async function handleWebhook(request: Request, env: Env, db: Db): Promise<Response> {
+async function logPhonePeAttempt(db: Db, data: Omit<typeof phonepeWebhookLogs.$inferInsert, 'id' | 'createdAt'>) {
+  await db.insert(phonepeWebhookLogs).values(data)
+}
+
+async function handleCashfreeWebhook(request: Request, env: Env, db: Db): Promise<Response> {
   const rawBody   = await request.text()
   const signature = request.headers.get('x-webhook-signature') ?? ''
   const timestamp = request.headers.get('x-webhook-timestamp') ?? ''
@@ -147,6 +161,122 @@ async function handleWebhook(request: Request, env: Env, db: Db): Promise<Respon
 
   await logAttempt(db, {
     outcome: 'processed', eventType, cashfreeOrderId, headers, rawBody,
+    emailAttempted, emailSent, emailError,
+  })
+  return json({ success: true })
+}
+
+// PhonePe webhook payload shape (v2 / Standard Checkout):
+// { event: "checkout.order.completed" | "checkout.order.failed" | ...,
+//   payload: { merchantOrderId, orderId, state, amount, ... } }
+// merchantOrderId is *our* generated orderId (see phonepe-payment-actions.ts)
+// — that's what paymentOrders.phonepeOrderId is keyed on, not PhonePe's own orderId.
+async function handlePhonePeWebhook(request: Request, env: Env, db: Db): Promise<Response> {
+  const rawBody   = await request.text()
+  const authHeader = request.headers.get('authorization') ?? ''
+  const headers    = Object.fromEntries(request.headers.entries())
+
+  const validAuth = await verifyPhonePeWebhookAuth(authHeader, env.PHONEPE_WEBHOOK_USERNAME, env.PHONEPE_WEBHOOK_PASSWORD)
+  if (!validAuth) {
+    await logPhonePeAttempt(db, {
+      outcome: 'signature_invalid', headers, rawBody,
+      errorMessage: authHeader ? 'authorization header present but did not match' : 'authorization header missing',
+    })
+    return json({ error: 'Unauthorized' }, 401)
+  }
+
+  let event: Record<string, any>
+  try {
+    event = JSON.parse(rawBody)
+  } catch {
+    await logPhonePeAttempt(db, { outcome: 'invalid_json', headers, rawBody })
+    return json({ error: 'Invalid JSON' }, 400)
+  }
+
+  const eventType      = typeof event.event === 'string' ? event.event : undefined
+  const payload         = event.payload ?? {}
+  const phonepeOrderId  = payload.merchantOrderId as string | undefined
+  const state            = payload.state as string | undefined
+
+  if (!phonepeOrderId) {
+    await logPhonePeAttempt(db, { outcome: 'missing_order_id', eventType, headers, rawBody })
+    return json({ error: 'Missing merchantOrderId' }, 400)
+  }
+
+  const [paymentOrder] = await db
+    .select()
+    .from(paymentOrders)
+    .where(eq(paymentOrders.phonepeOrderId, phonepeOrderId))
+    .limit(1)
+
+  if (!paymentOrder) {
+    await logPhonePeAttempt(db, { outcome: 'unknown_order', eventType, phonepeOrderId, headers, rawBody })
+    return json({ received: true })
+  }
+
+  if (eventType === 'checkout.order.failed' || state === 'FAILED') {
+    await db.update(paymentOrders)
+      .set({ status: 'failed', gatewayResponse: event, updatedAt: new Date() })
+      .where(eq(paymentOrders.phonepeOrderId, phonepeOrderId))
+    await logPhonePeAttempt(db, { outcome: 'processed', eventType, phonepeOrderId, headers, rawBody })
+    return json({ received: true })
+  }
+
+  if (eventType !== 'checkout.order.completed' && state !== 'COMPLETED') {
+    await logPhonePeAttempt(db, { outcome: 'ignored_event', eventType, phonepeOrderId, headers, rawBody })
+    return json({ received: true })
+  }
+
+  // Already processed — webhook retry, avoid re-enrolling / re-emailing.
+  if (paymentOrder.status === 'paid') {
+    await logPhonePeAttempt(db, { outcome: 'processed', eventType, phonepeOrderId, headers, rawBody })
+    return json({ success: true })
+  }
+
+  const email    = paymentOrder.email
+  const password = generatePassword(14)
+
+  let emailAttempted = false
+  let emailSent      = false
+  let emailError: string | undefined
+
+  try {
+    const { userId, isNewUser } = await createOrEnrollUser(db, env, email, password, paymentOrder.name, paymentOrder.batchTierId)
+
+    await db.update(paymentOrders)
+      .set({ status: 'paid', userId, isNewUser, gatewayResponse: event, updatedAt: new Date() })
+      .where(eq(paymentOrders.phonepeOrderId, phonepeOrderId))
+
+    emailAttempted = true
+    try {
+      const res = await fetch(`${env.MAIN_APP_URL}/api/internal/phonepe-webhook-notify`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-secret': env.INTERNAL_WEBHOOK_SECRET },
+        body: JSON.stringify({
+          email,
+          name:       paymentOrder.name,
+          isNewUser,
+          password:   isNewUser ? password : undefined,
+          batchTierId: paymentOrder.batchTierId,
+        }),
+      })
+      if (!res.ok) throw new Error(`notify route responded ${res.status}`)
+      emailSent = true
+    } catch (err) {
+      emailError = err instanceof Error ? err.message : String(err)
+      console.error('[phonepe-webhook] Failed to call notify route:', emailError)
+    }
+  } catch (error: any) {
+    console.error('[phonepe-webhook] Error:', error.message)
+    await logPhonePeAttempt(db, {
+      outcome: 'error', eventType, phonepeOrderId, headers, rawBody, errorMessage: error.message,
+      emailAttempted, emailSent, emailError,
+    })
+    return json({ error: error.message }, 500)
+  }
+
+  await logPhonePeAttempt(db, {
+    outcome: 'processed', eventType, phonepeOrderId, headers, rawBody,
     emailAttempted, emailSent, emailError,
   })
   return json({ success: true })

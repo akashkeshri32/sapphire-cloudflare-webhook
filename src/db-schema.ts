@@ -8,13 +8,16 @@ import { pgTable, text, integer, timestamp, pgEnum, jsonb, boolean, unique } fro
 // truth in the main app: lib/drizzle/schema/{payment-order,user,batch,cashfree-webhook-log}.ts
 
 export const paymentOrderStatusEnum = pgEnum('payment_order_status', ['created', 'paid', 'failed'])
+export const paymentGatewayEnum    = pgEnum('payment_gateway', ['cashfree', 'phonepe'])
 export const roleEnum              = pgEnum('role', ['admin', 'instructor', 'student', 'marketing'])
 export const statusEnum            = pgEnum('status', ['pending', 'enrolled'])
 export const enrollmentStatusEnum  = pgEnum('enrollment_status', ['active', 'completed', 'dropped'])
 
 export const paymentOrders = pgTable('payment_orders', {
   id:               text('id').primaryKey().default(sql`gen_random_uuid()`),
-  cashfreeOrderId:  text('cashfree_order_id').notNull().unique(),
+  gateway:          paymentGatewayEnum().notNull().default('cashfree'),
+  cashfreeOrderId:  text('cashfree_order_id').unique(),
+  phonepeOrderId:   text('phonepe_order_id').unique(),
   batchTierId:      text('batch_tier_id').notNull(),
   userId:           text('user_id'),
   isNewUser:        boolean('is_new_user'),
@@ -60,4 +63,18 @@ export const cashfreeWebhookLogs = pgTable('cashfree_webhook_logs', {
   emailSent:       boolean('email_sent'),
   emailError:      text('email_error'),
   createdAt:       timestamp('created_at').notNull().defaultNow(),
+})
+
+export const phonepeWebhookLogs = pgTable('phonepe_webhook_logs', {
+  id:             text('id').primaryKey().default(sql`gen_random_uuid()`),
+  outcome:        text('outcome').notNull(),
+  eventType:      text('event_type'),
+  phonepeOrderId: text('phonepe_order_id'),
+  headers:        jsonb('headers'),
+  rawBody:        text('raw_body'),
+  errorMessage:   text('error_message'),
+  emailAttempted: boolean('email_attempted'),
+  emailSent:      boolean('email_sent'),
+  emailError:     text('email_error'),
+  createdAt:      timestamp('created_at').notNull().defaultNow(),
 })

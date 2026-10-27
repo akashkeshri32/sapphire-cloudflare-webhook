@@ -6,3 +6,8 @@ CASHFREE_SECRET_KEY=
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 INTERNAL_WEBHOOK_SECRET=
+
+# PhonePe webhook auth — the username/password pair you set in the PhonePe
+# Business Dashboard (Developer Settings > Webhook), NOT the API client_id/secret.
+PHONEPE_WEBHOOK_USERNAME=
+PHONEPE_WEBHOOK_PASSWORD=
